@@ -1,0 +1,109 @@
+variables:
+  # When using dind service, you must instruct docker to talk with the
+  # daemon started inside of the service. The daemon is available with
+  # a network connection instead of the default /var/run/docker.sock socket.
+  # DOCKER_HOST: tcp://docker:2375
+
+  # Docker-in-Docker with TLS disabled in the Docker executor
+  # This instructs Docker not to start over TLS.
+  # DOCKER_TLS_CERTDIR: ""
+
+  IMAGE_NAME: "service-discovery-dev"
+  IMAGE_REGISTRY_HOSTED: "docker-test.mic.com.tw:8083"
+  IMAGE_REGISTRY_GROUP: "docker-test.mic.com.tw:8090"
+  APP_NAME: "service-discovery-dev-ci-test"
+
+default:
+  tags: # 如果使用了多個 tags 那 gitlab runner 必須都具有這些 tags 才會將 job 指派給它.
+    - docker # 預設每個 job 都使用 docker executor 執行 (gitlab runner 註冊時 tag 須加上 docker).
+
+stages: # DevSecOps 的 4個 stages, 也代表 job 的執行順序.
+  - build
+  - scan
+  - publish
+  - deploy
+
+build-job:
+  stage: build
+  script:
+    - echo "Docker build image..."
+    - >
+      docker build
+      -f WebApi.Service.Discovery/Dockerfile
+      --label "org.opencontainers.image.title=$CI_PROJECT_TITLE"
+      --label "org.opencontainers.image.url=$CI_PROJECT_URL"
+      --label "org.opencontainers.image.created=$CI_JOB_STARTED_AT"
+      --label "org.opencontainers.image.revision=$CI_COMMIT_SHA"
+      --label "org.opencontainers.image.version=$CI_COMMIT_REF_NAME"
+      -t ${IMAGE_NAME}:$CI_COMMIT_REF_NAME --no-cache .
+    - docker save -o ${IMAGE_NAME}:$CI_COMMIT_REF_NAME.tgz ${IMAGE_NAME}:$CI_COMMIT_REF_NAME
+  artifacts:
+    name: "$CI_JOB_NAME-artifacts"
+    paths: # 將 docker save 匯出的 image 保存起來
+      - ${IMAGE_NAME}:$CI_COMMIT_REF_NAME.tgz
+    expire_in: 30 mins # artifacts 的檔案只保存 30 分鐘
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists: # Dockerfile 必須存在才執行 build stage
+        - WebApi.Service.Discovery/Dockerfile
+
+sonarqube-check: # 此段語法基本上直接從 SonarQube 產生
+  stage: scan
+  image: mcr.microsoft.com/dotnet/sdk:5.0 # 必須修改為 sdk 映像檔
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar" # Defines the location of the analysis task cache
+    GIT_DEPTH: "0" # Tells git to fetch all the branches of the project, required by the analysis task
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
+  script:
+    - echo "Scan image..."
+    - "apt-get update"
+    - "apt-get install --yes openjdk-11-jre"
+    - "dotnet tool install --global dotnet-sonarscanner"
+    - 'export PATH="$PATH:$HOME/.dotnet/tools"'
+    - 'dotnet sonarscanner begin /k:"shawn.yang_service-discovery_AX-0p7mSsp7jL6RCNBB0" /d:sonar.login="$SONAR_TOKEN" /d:"sonar.host.url=$SONAR_HOST_URL" '
+    - "dotnet build"
+    - 'dotnet sonarscanner end /d:sonar.login="$SONAR_TOKEN"'
+  allow_failure: true
+  only:
+    - DEV # DEV branch 才執行 scan stage
+
+publish-to-nexus: # 只有前面的 stage 都成功執行後才會執行 publish stage.
+  variables:
+    # publish stage 不需要 clone source code. (https://docs.gitlab.com/ee/ci/runners/configure_runners.html#git-strategy)
+    GIT_STRATEGY: none
+  stage: publish
+  before_script:
+    - mkdir -p $HOME/.docker
+    - echo $DOCKER_AUTH_CONFIG > $HOME/.docker/config.json
+  script: # 讀取從 build-job stage 保存的 image 然後發布至 Nexus docker registry
+    - echo "Publish to Nexus server..."
+    - docker load -i ${IMAGE_NAME}:$CI_COMMIT_REF_NAME.tgz
+    - docker tag ${IMAGE_NAME}:$CI_COMMIT_REF_NAME ${IMAGE_REGISTRY_HOSTED}/${IMAGE_NAME}:$CI_COMMIT_REF_NAME
+    - docker push ${IMAGE_REGISTRY_HOSTED}/${IMAGE_NAME}:$CI_COMMIT_REF_NAME
+  dependencies:
+    - build-job
+
+deploy-service:
+  stage: deploy
+  tags:
+    - shell # 使用 Shell Executor
+  variables: # overwrite global DOCKER_HOST value
+    DOCKER_HOST: ""
+  before_script:
+    # 必須做 login 的動作, 做身分驗證 (本以為會直接讀取 ~/.docker/config.json 卻沒生效...)
+    - docker login -u $DOCKER_REGISTRY_USER -p $DOCKER_REGISTRY_PASSWORD ${IMAGE_REGISTRY_GROUP}
+  script: # 從 Nexus docker registry 下載先前發布的 image, 並且運行起來.
+    - echo "Deploy service..."
+    - docker pull ${IMAGE_REGISTRY_GROUP}/${IMAGE_NAME}:$CI_COMMIT_REF_NAME
+    - |
+      if [[ $(docker inspect -f '{{.State.Running}}' $APP_NAME) == "true" ]]; then
+        echo "Stop $APP_NAME first..."
+        docker container stop $APP_NAME
+        docker container rm $APP_NAME
+      else
+        echo "$APP_NAME not running"
+      fi
+    - docker run -d -p 9990:80 --name $APP_NAME ${IMAGE_REGISTRY_GROUP}/${IMAGE_NAME}:$CI_COMMIT_REF_NAME
