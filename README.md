@@ -1,11 +1,11 @@
 # DevSecOps use GitLab
 
 * 使用 docker-compose 執行 GitLab, 並且運行 GitLab Runner 作為 Continuous integration / Continuous Deployment (CI/CD) 工具
-* 目的是為了實現 [DevSecOps](https://www.ibm.com/tw-zh/cloud/learn/devsecops) , 我在 [pipeline](http://10.88.26.237/docker/gitlab/-/blob/main/.gitlab-ci.yml) 定義了幾 4 個 stages 如下
-  * ___build___ : 使用 [Docker Executor](http://10.88.26.237/docker/gitlab/-/blob/main/README-docker-executor.md) 去 build docker image
-  * ___scan___ : 使用 Docker Executor 整合使用 SonarQube 做程式碼的安全性分析, 詳細可參考[說明文件](https://docs.sonarqube.org/latest/analysis/gitlab-integration/)和[.gitlab-ci.yml](http://10.88.26.237/docker/gitlab/-/blob/main/.gitlab-ci.yml)
+* 目的是為了實現 [DevSecOps](https://www.ibm.com/tw-zh/cloud/learn/devsecops) , 我在 [pipeline](https://github.com/ShungYang/gitlab/blob/master/.gitlab-ci.yml) 定義了幾 4 個 stages 如下
+  * ___build___ : 使用 [Docker Executor](https://github.com/ShungYang/gitlab/blob/master/README-docker-executor.md) 去 build docker image
+  * ___scan___ : 使用 Docker Executor 整合使用 SonarQube 做程式碼的安全性分析, 詳細可參考[說明文件](https://docs.sonarqube.org/latest/analysis/gitlab-integration/)和[.gitlab-ci.yml](https://github.com/ShungYang/gitlab/blob/master/.gitlab-ci.yml)
   * ___publish___ : 使用 Docker Executor 把之前在 build stage 打包好的 docker image publish 到 [Nexus docker registry](http://10.88.26.237/docker/nexus-server/-/tree/main) 上.
-  * ___deploy___ : 在欲運行 docker container service 的 host 上 `install` gitlab runner 註冊為 [Shell Executor]((http://10.88.26.237/docker/gitlab/-/blob/main/README-shell-executor.md)) 來運行容器服務.
+  * ___deploy___ : 在欲運行 docker container service 的 host 上 `install` gitlab runner 註冊為 [Shell Executor]((https://github.com/ShungYang/gitlab/blob/master/README-shell-executor.md)) 來運行容器服務.
 
 ## GitLab Runner
 
@@ -79,7 +79,7 @@ note. `一個 Runner 可以被 register 多次, 或多種 Executor`.
 在註冊成功後就可以在 GitLab server 上看到該 Runner 為 Online 的狀態.
 另外這些設定會寫入到先前綁定的 volume 下的 : `/data/docker/volumes/gitlab-runner-config/_data/config.toml`
 
-我們還需要針對 Docker Executor 在 [config.toml](http://10.88.26.237/docker/gitlab/-/blob/main/config.toml) 中加入一個環境變數:
+我們還需要針對 Docker Executor 在 [config.toml](https://github.com/ShungYang/gitlab/blob/master/config.toml) 中加入一個環境變數:
 
 * `DOCKER_AUTH_CONFIG` : 讓我們可以在 Docker Executor 中能存取 Nexus docker registry 中的 image.
 

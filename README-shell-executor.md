@@ -19,7 +19,7 @@
 * Enter a description for the runner.
 * Enter the tags associated with the runner.
   * 這邊使用 `shell`.
-  * 之後我會在 [.gitlab-ci.yml](http://10.88.26.237/docker/gitlab/-/blob/main/.gitlab-ci.yml) 中的 job 透過 `tag` 指定要執行在哪個 runner.
+  * 之後我會在 [.gitlab-ci.yml](https://github.com/ShungYang/gitlab/blob/master/.gitlab-ci.yml) 中的 job 透過 `tag` 指定要執行在哪個 runner.
   * 而一個 Runner 可有多個 tag 並使用逗號分隔
   * 另外可以在 GitLab server 針對 Runner 設定是否 `Run untagged jobs`
 * Enter any optional maintenance note for the runner.

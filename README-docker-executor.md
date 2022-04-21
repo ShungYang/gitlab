@@ -35,11 +35,11 @@ Docker executor 執行 job 時會分為以下幾個階段:
 * Enter a description for the runner.
 * Enter the tags associated with the runner.
   * 這邊使用 `docker`.
-  * 之後我會在 [.gitlab-ci.yml](http://10.88.26.237/docker/gitlab/-/blob/main/.gitlab-ci.yml) 中的 job 透過 `tag` 指定要執行在哪個 runner.
+  * 之後我會在 [.gitlab-ci.yml](https://github.com/ShungYang/gitlab/blob/master/.gitlab-ci.yml) 中的 job 透過 `tag` 指定要執行在哪個 runner.
   * 而一個 Runner 可有多個 tag 並使用逗號分隔
   * 另外可以在 GitLab server 針對 Runner 設定是否為 [Run untagged jobs](https://docs.gitlab.com/ee/ci/runners/configure_runners.html#use-tags-to-control-which-jobs-a-runner-can-run)
 * Enter any optional maintenance note for the runner.
-* Provide the runner executor. For most use cases, enter ___docker___ [說明為何使用 Docker Executor](http://10.88.26.237/docker/gitlab/-/blob/main/README-docker-executor.md).
+* Provide the runner executor. For most use cases, enter ___docker___ [說明為何使用 Docker Executor](https://github.com/ShungYang/gitlab/blob/master/README-docker-executor.md).
 * the default image to be used for projects that do not define one in .gitlab-ci.yml
   * __作為 build docker image 的環境, 目前使用 docker:20.10.13__ (tag 應該要指定明確的版本, 不要使用 latest)
 
@@ -54,7 +54,7 @@ Docker executor 執行 job 時會分為以下幾個階段:
 image 和 service 可依照使用的情境定義在以下的文件中
 
 * [.gitlab-ci.yml](https://docs.gitlab.com/runner/executors/docker.html#define-image-and-services-from-gitlab-ciyml) (by project)
-* config.toml (by runner) : 由於目前使用的 CI Pipeline 都有共用的 image 和 service 所以我統一定義在 [config.toml](http://10.88.26.237/docker/gitlab/-/blob/main/config.toml) 中
+* config.toml (by runner) : 由於目前使用的 CI Pipeline 都有共用的 image 和 service 所以我統一定義在 [config.toml](https://github.com/ShungYang/gitlab/blob/master/config.toml) 中
 
 ## Define an image from a private Docker registry
 
@@ -84,7 +84,7 @@ docker login registry.example.com:5000 --username my_username --password my_pass
 image: my.registry.tld:5000/namepace/image:tag
 ```
 
-* ___Per-runner___: 新增 `DOCKER_AUTH_CONFIG` 環境變數在 [config.toml](http://10.88.26.237/docker/gitlab/-/blob/main/config.toml), 如果有修改的話必定要重啟 runner 服務.
+* ___Per-runner___: 新增 `DOCKER_AUTH_CONFIG` 環境變數在 [config.toml](https://github.com/ShungYang/gitlab/blob/master/config.toml), 如果有修改的話必定要重啟 runner 服務.
 
 ## Caching in GitLab CI/CD
 
@@ -101,7 +101,7 @@ image: my.registry.tld:5000/namepace/image:tag
   * `只能在 job 中去定義 artifacts, 而不是 global`.
   * 同 pipeline 後續 job 可以使用 artifacts.
   * 不同 project 不能共用 artifacts.
-  * 在 [.gitlab-ci.yml](http://10.88.26.237/docker/gitlab/-/blob/main/.gitlab-ci.yml) 的 job 中使用 `artifacts` 儲存檔案, 並在隨後的 job 使用 `dependencies` 取得檔案.
+  * 在 [.gitlab-ci.yml](https://github.com/ShungYang/gitlab/blob/master/.gitlab-ci.yml) 的 job 中使用 `artifacts` 儲存檔案, 並在隨後的 job 使用 `dependencies` 取得檔案.
   * Artifacts 預設為 30天後過期. ([可自行定義](https://docs.gitlab.com/ee/user/admin_area/settings/continuous_integration.html#default-artifacts-expiration))
   * 如果 keep latest artifacts is enabled, 最新的 artifacts 將不會過期.
 
@@ -111,11 +111,11 @@ artifacts 和 caches 中定義的 paths 都是相對於 project 目錄.
 
 Docker containers 預設為 `unprivileged` 模式, 所以 container 不允許存取任何 devices. 但是 `privileged` container 具有存取所有 devices 的權限, 為了在 Docker-in-Docker 的情境下能存取 docker daemon, 所以我們必須啟用 `privileged` 模式.
 
-當使用 ___docker run --privileged___ 指令時, Docker 將會啟用啟用 `privileged` 模式, 但是我選擇設定在 [config.toml](http://10.88.26.237/docker/gitlab/-/blob/main/config.toml) 中, 讓 privileged flag 會被套用到 build container 和 services 中.
+當使用 ___docker run --privileged___ 指令時, Docker 將會啟用啟用 `privileged` 模式, 但是我選擇設定在 [config.toml](https://github.com/ShungYang/gitlab/blob/master/config.toml) 中, 讓 privileged flag 會被套用到 build container 和 services 中.
 
 ## Docker-in-Docker with TLS disabled in the Docker executor
 
-可以參考 [config.toml](http://10.88.26.237/docker/gitlab/-/blob/main/config.toml) 和 [.gitlab-ci.yml](http://10.88.26.237/docker/gitlab/-/blob/main/.gitlab-ci.yml) 的設定方式來關閉 TLS
+可以參考 [config.toml](https://github.com/ShungYang/gitlab/blob/master/config.toml) 和 [.gitlab-ci.yml](https://github.com/ShungYang/gitlab/blob/master/.gitlab-ci.yml) 的設定方式來關閉 TLS
 
 ## Limitations of Docker-in-Docker
 
