@@ -26,6 +26,12 @@ Docker executor 執行 job 時會分為以下幾個階段:
 
 ## Register the runner as docker executor
 
+透過 ___docker exec -it___ 運行註冊指令 ___gitlab-runner register___
+
+```
+docker exec -it gitlab-runner-docker gitlab-runner register
+```
+
 因為我要在 Docker container 中去 build docker image, 所以這個 runner 註冊時要設定為 Docker Executor, 註冊的過程有幾個 Q&A
 
 * Enter your GitLab instance URL.
