@@ -1,0 +1,49 @@
+variables:
+  # When using dind service, you must instruct docker to talk with the
+  # daemon started inside of the service. The daemon is available with
+  # a network connection instead of the default /var/run/docker.sock socket.
+  DOCKER_HOST: tcp://docker:2375
+
+  # Docker-in-Docker with TLS disabled in the Docker executor
+  # This instructs Docker not to start over TLS.
+  DOCKER_TLS_CERTDIR: ""
+
+default:
+  tags: # 如果使用了多個 tags 那 gitlab runner 必須都具有這些 tags 才會將 job 指派給它.
+    - docker # 預設每個 job 都使用 docker executor 執行 (gitlab runner 註冊時 tag 須加上 docker).
+
+stages: # DevSecOps 的 4個 stages, 也代表 job 的執行順序.
+  - build
+  - scan
+  - publish
+  - bridge
+
+script:
+  - echo "edit-chart..."
+  - echo "complete."
+
+build-job:
+  stage: build
+  script:
+    - echo "Docker build image..."
+    - echo "complete."
+
+sonarqube-check:
+  stage: scan
+  script:
+    - echo "Scan image..."
+    - echo "complete."
+
+publish-to-nexus:
+  stage: publish
+  script:
+    - echo "Publish to Nexus server..."
+    - echo "complete."
+
+bridge-job:
+  stage: bridge
+  variables:
+    CV_UPPSTREAM_PRJ_NAME: $CI_PROJECT_NAME
+    CV_IMAGE_TAG: "1.1"
+  trigger: # trigger downstream
+    project: shawn.yang/demo-manifest

@@ -10,7 +10,13 @@
 
 ## Register the runner as shell executor
 
-因為我要在 Docker container 中去 build docker image, 所以這個 runner 註冊時要設定為 Docker Executor, 註冊的過程有幾個 Q&A
+運行註冊指令 ___gitlab-runner register___
+
+```
+sudo gitlab-runner register
+```
+
+因為我要直接在 Host 上去 run docker image, 所以這個 runner 註冊時要設定為 Shell Executor, 註冊的過程有幾個 Q&A
 
 * Enter your GitLab instance URL.
 * Enter the token you obtained to register the runner.
@@ -24,6 +30,14 @@
   * 另外可以在 GitLab server 針對 Runner 設定是否 `Run untagged jobs`
 * Enter any optional maintenance note for the runner.
 * Provide the runner executor. For most use cases, enter ___shell___
+
+## Overview
+
+Shell executor 在執行 job 時
+
+* 會將專案 checked out 到這個目錄並且 .git 也會存在這裡 : <working-directory>/builds/<short-token>/<concurrent-id>/<namespace>/<project-name>.
+
+* 執行過程中的 caches 會被保存在 : <working-directory>/cache/<namespace>/<project-name>.
 
 ## Important
 
@@ -44,6 +58,23 @@ sudo -u gitlab-runner -H docker info
 ```
 sudo vim /etc/gitlab-runner/config.toml
 ```
+
+## Use Helm CLI
+
+* 如果要使用 Helm manager 來發佈服務到 K8S 群集中的話, 需要額外安裝 Helm3, 可參考這篇 [Helm guide](https://github.com/ShungYang/helm-guide)
+
+* 因為在 shell executor 中是以 gitlab-runner 這個 user 來運行 script, 所以需要給 gitlab-runner 有 root 權限才能夠存取其他 user 的擋案, ex. /home/{user}/.kube/config
+
+```bash
+sudo usermod -a -G sudo gitlab-runner
+```
+
+```bash
+sudo vim /etc/sudoers
+```
+
+讓 gitlab-runner 不用輸入 sudo 密碼
+`gitlab-runner ALL=(ALL) NOPASSWD: ALL`
 
 ## Reference Link
 
