@@ -35,7 +35,7 @@ sudo gitlab-runner register
 
 Shell executor 在執行 job 時
 
-* 會將專案 checked out 到這個目錄並且 .git 也會存在這裡 : <working-directory>/builds/<short-token>/<concurrent-id>/<namespace>/<project-name>.
+* 會將專案 checked out 到這個目錄並且 .git 也會存在這裡 : <working-directory>/builds/<short-token>/<concurrent-id>/<namespace>/<project-name>. (ex. /home/gitlab-runner/builds/)
 
 * 執行過程中的 caches 會被保存在 : <working-directory>/cache/<namespace>/<project-name>.
 

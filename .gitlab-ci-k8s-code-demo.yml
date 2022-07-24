@@ -1,0 +1,196 @@
+# 情境 : Code Repo for build docker image
+# 開發人員 push `DEV` 時觸發 DEV pipeline 執行 :
+#   1. build-scan (Build Dockefile include Static Code Analysis)
+#   2. test
+#   3. publish (Publish docker image to Nexus)
+#   4. trigger (publish-manifest-repo : Clone Manifest repo, Modify YAMLs, Push to Manifest repo)
+# apply Merge Request `DEV` into 'main'
+#   1. 部門主管確認沒問題按下 Approve (TO-DO : 通知 SQA)
+# SQA 按下 Merge 會觸發 main pipeline 執行 :
+#   1. build-scan
+#   2. publish
+#   3. trigger (merge-request-manifest-repo)
+
+variables:
+  # When using dind service, you must instruct docker to talk with the
+  # daemon started inside of the service. The daemon is available with
+  # a network connection instead of the default /var/run/docker.sock socket.
+  DOCKER_HOST: tcp://docker:2375
+
+  # Docker-in-Docker with TLS disabled in the Docker executor
+  # This instructs Docker not to start over TLS.
+  DOCKER_TLS_CERTDIR: ""
+
+  GIT_STRATEGY: none
+
+  CV_MANIFEST_PRJ_ID: "17"
+
+  CV_ENVIRONMENT: $CI_COMMIT_REF_SLUG
+  CV_TAG: "None"
+
+# 執行條件:
+# 必須要存在 Dockerfile, gitlab-ci-variables.yml
+# 必須要更改 gitlab-ci-variables.yml 中的 tag
+# Conditional Set Variable
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        #CV_SRC_FOLDER}/Dockerfile
+        - gitlab-ci-variables.yml
+    #   changes:
+    #     - gitlab-ci-variables.yml
+    - if: $CI_COMMIT_REF_SLUG == "main"
+      variables:
+        CV_ENVIRONMENT: "prod"
+
+default:
+  tags:
+    - shell
+    - 10.88.26.237
+
+stages:
+  - info
+  - variables
+  - build
+  - test
+  - publish
+  - trigger
+
+show-info:
+  variables:
+    GIT_STRATEGY: none
+  stage: info
+  script:
+    - echo "顯示所有 GitLab 變數."
+    - export
+  after_script:
+    - echo "show-info completes."
+  rules:
+    - when: always
+
+assign-variables:
+  variables:
+    GIT_STRATEGY: fetch
+  stage: variables
+  before_script: # 安裝 yq
+    # - "wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64"
+    # - "chmod a+x /usr/local/bin/yq"
+    # - "yq --version"
+    # - CV_TAG=$(yq -e '.variables.tag' gitlab-ci-variables.yml)
+    - | # 如果 yq 尚未下載過的話, 就進行安裝
+      if [ ! -f "/usr/local/bin/yq" ]
+      then
+        echo "Install yq"
+        sudo add-apt-repository ppa:rmescandon/yq
+        sudo apt update
+        sudo apt install --yes wget
+        sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo chmod a+x /usr/local/bin/yq
+      fi
+    - "yq --version"
+    - CV_TAG=$(yq -e '.variables.tag' gitlab-ci-variables.yml)
+  script:
+    - echo "Assign variable..."
+    - echo "${CV_ENVIRONMENT} ${CV_TAG}"
+    - echo "CV_ENVIRONMENT=${CV_ENVIRONMENT}" >> variables.env
+    - echo "CV_TAG=${CV_TAG}" >> variables.env
+  artifacts:
+    reports:
+      dotenv: variables.env
+
+build-docker-scan:
+  variables:
+    GIT_STRATEGY: fetch
+  stage: build
+  script:
+    - |
+      echo "編譯 Dockerfile, 同時使用 SonarScanner 作安全性掃描."
+      echo "$CI_PIPELINE_SOURCE $CI_COMMIT_BRANCH"
+  after_script:
+    - echo "build-docker-scan completes."
+
+.testing-unit:
+  stage: test
+  only:
+    - DEV
+  script:
+    - echo "執行測單元測試"
+    - sleep 5
+  after_script:
+    - echo "testing-unit completes."
+
+.testing-performance:
+  stage: test
+  only:
+    - DEV
+  script:
+    - echo "執行效能測試"
+  after_script:
+    - echo "testing-performance completes."
+
+publish-to-nexus:
+  stage: publish
+  script:
+    - echo "將 build-docker-scan 產生的 docker image 上傳到 Nexus Server"
+  after_script:
+    - echo "publish-to-nexus completes."
+
+publish-manifest-repo:
+  stage: trigger
+  only:
+    - DEV
+  dependencies:
+    - assign-variables
+  before_script: # 如果 yq 尚未下載過的話, 就進行安裝
+    - |
+      if [ ! -f "/usr/local/bin/yq" ]
+      then
+        echo "Install yq"
+        sudo add-apt-repository ppa:rmescandon/yq
+        sudo apt update
+        sudo apt install --yes wget
+        sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo chmod a+x /usr/local/bin/yq
+      fi
+  script:
+    # 如果資料夾 k8s-manifest 不存在的話, 就 git clone
+    - |
+      if [ ! -d "k8s-manifest" ]
+      then
+        echo "k8s-manifest does not exist, Clone YAML repo"
+        git clone http://shawn.yang:${CV_RUNNER_TOKEN}@10.88.26.237/shawn.yang/k8s-manifest.git
+      fi
+
+    - echo "Configure git"
+    - cd k8s-manifest
+    - git config user.name $GITLAB_USER_LOGIN
+    - git config user.email $GITLAB_USER_EMAIL
+    - git pull
+    - git checkout $CI_COMMIT_BRANCH
+
+    - echo "Update YAML $CV_TAG @$PWD"
+    - yq -i ".deploy.image.tag = $CV_TAG" values.yaml
+
+    - echo "Commit & Push to YAML repo"
+    - git add .
+    - git commit -m "Version:$CV_TAG @$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
+    - git push origin $CI_COMMIT_BRANCH
+  after_script:
+    - echo "publish-manifest-repo completes."
+
+merge-request-manifest-repo:
+  stage: trigger
+  only:
+    - main
+  script:
+    - echo "Call merge-request api to YAML repo id:$CV_MANIFEST_PRJ_ID"
+    - >
+      curl
+      --request POST --header "PRIVATE-TOKEN: DLuk92uGE7UxsEhzje6f"
+      "http://10.88.26.237/api/v4/projects/$CV_MANIFEST_PRJ_ID/merge_requests"
+      --header 'Content-Type: application/json'
+      --show-error
+      --data "{\"title\":\"merge-request version:$CV_TAG\",\"source_branch\":\"DEV\",\"target_branch\":\"main\"}"
+  after_script:
+    - echo "merge-request-manifest-repo completes."

@@ -5,11 +5,11 @@ check_interval = 0
   session_timeout = 1800
 
 [[runners]]
-  name = "docker-test@236"
+  name = "docker@238"
   url = "http://10.88.26.237:80"
-  token = "a1B8m9FsNrgPD2jHUtCC"
+  token = "m8r57KUTMyjztJYHZZde"
   executor = "docker"
-  environment = ["DOCKER_AUTH_CONFIG={\"auths\":{\"docker-test.mic.com.tw:8083\":{\"auth\":\"c2Zjcy50ZXN0ZXI6c2Zjcw==\"}}}"]
+  environment = ["DOCKER_AUTH_CONFIG={\"auths\":{\"sfcs-docker.mic.com.tw:8083\":{\"auth\":\"c2Zjcy50ZXN0ZXI6c2Zjcw==\"},\"sfcs-docker.mic.com.tw:8091\":{\"auth\":\"c2Zjcy50ZXN0ZXI6c2Zjcw==\"}}}"]
   [runners.custom_build_dir]
   [runners.cache]
     [runners.cache.s3]

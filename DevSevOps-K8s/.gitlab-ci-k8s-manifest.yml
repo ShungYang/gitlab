@@ -1,3 +1,11 @@
+# 情境 : Manifest repo for deploy helm to K8S
+# 由 Code repo push `DEV` 時觸發 DEV pipeline 執行 :
+#   1. deploy
+# 由 Code repo merge-request `DEV` into 'main'
+# 當到了上線時間 SQA 即可按下 Merge 作一鍵佈署
+# SQA 按下 Merge 會觸發 main pipeline 執行 :
+#   1. deploy
+
 # 由於我想讓這個 pipeline 只透過 demo-code 的 pipeline 來觸發, 所以必須使用 workflow.rules 關鍵字來設定觸發規則,
 # 判斷 $CI_PIPELINE_SOURCE 必須為 "pipeline", 所以一般的 commit, push, merge request 事件將不會觸發此 pipeline.
 # $CI_PIPELINE_SOURCE 為一個 Gitlab Predefined variables 可參考 https://docs.gitlab.com/ee/ci/variables/predefined_variables.html
@@ -21,24 +29,26 @@ variables:
   HELM_REPOSITORY_NAME: "nexus-helm-hosted-demo"
   HELM_CHART_NAME: "demo-multi-pipe"
 
-stages:
-  - publish # 修改 helm chart 的內容後, 打包並上傳到 Nexus private repository.
-  - deploy # deploy helm chart to k8s cluster.
-
-# 由於我定義所有的 jobs 都要執行在同一台 host 上, 所以可以忽略掉不同 job 會被分配到不同 shell executor 上,
-# 所造成擋案需要上傳/下載 到 artifacts 來跨 jobs 傳遞的問題.
-
+# TO-DO: 需要根據正式區 / 測試區 切換 host tag
 default:
   tags: # 如果使用了多個 tags 那 gitlab runner 必須都具有這些 tags 才會將 job 指派給它.
     - shell # 預設每個 job 都使用 shell executor 執行 (gitlab runner 註冊時 tag 須加上 shell).
     - 10.88.26.238 # 指定這台 host 作 helm chart 發佈, 有一些前置配置需參考 [README-shell-executor.md](https://github.com/ShungYang/gitlab/blob/master/README-shell-executor.md).
 
-edit-chart: # 用來修改 helm chart values.yaml, 現階段可以直接使用 upperstream 傳的 image tag 變數.
-  stage: publish
+stages:
+  - info
+  - publish # 修改 helm chart 的內容後, 打包並上傳到 Nexus private repository.
+  - deploy # deploy helm chart to k8s cluster.
+
+show-info:
+  stage: info
   script:
-    - echo "edit-chart..."
-    # TO-DO: edit chart
-    - echo "complete."
+    - echo "顯示所有 GitLab 變數."
+    - export
+  after_script:
+    - echo "show-info completes."
+  rules:
+    - when: always
 
 # 是以 gitlab-runner 這個 user 來運行 Helm CLI, 所以需要給 gitlab-runner 有 root 權限.
 # $HELM_REPOSITORY_USER, $HELM_REPOSITORY_PASSWORD 使用 Settings > CI/CD > Variables 來定義,

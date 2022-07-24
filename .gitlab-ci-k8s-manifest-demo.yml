@@ -1,0 +1,69 @@
+# 情境 : Manifest repo for deploy helm to K8S
+# 由 Code repo push `DEV` 時觸發 DEV pipeline 執行 :
+#   1. deploy
+# 由 Code repo merge-request `DEV` into 'main'
+# 當到了上線時間 SQA 即可按下 Merge 作一鍵佈署
+# SQA 按下 Merge 會觸發 main pipeline 執行 :
+#   1. deploy
+
+variables:
+  CV_CHART_VERSION: "None"
+  CV_IMAGE_TAG: "None"
+
+default:
+  tags:
+    - shell
+    - 10.88.26.237
+
+stages:
+  - info
+  - variables
+  - deploy
+
+.show-info:
+  variables:
+    GIT_STRATEGY: none
+  stage: info
+  script:
+    - echo "顯示所有 GitLab 變數."
+    - export
+  after_script:
+    - echo "show-info completes."
+  rules:
+    - when: always
+
+assign-variables:
+  stage: variables
+  before_script: # 安裝 yq
+    # - "wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64"
+    # - "chmod a+x /usr/local/bin/yq"
+    # - "yq --version"
+    # - CV_IMAGE_TAG=$(yq -e '.variables.tag' gitlab-ci-variables.yml)
+    - | # 如果 yq 尚未下載過的話, 就進行安裝
+      if [ ! -f "/usr/local/bin/yq" ]
+      then
+        echo "Install yq"
+        sudo add-apt-repository ppa:rmescandon/yq
+        sudo apt update
+        sudo apt install --yes wget
+        sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo chmod a+x /usr/local/bin/yq
+      fi
+    - "yq --version"
+    - CV_IMAGE_TAG=$(yq -e '.deploy.image.tag' values.yaml)
+    - CV_CHART_VERSION=$(yq -e '.version' Chart.yaml)
+  script:
+    - echo "Assign variable..."
+    - echo "${CV_CHART_VERSION} ${CV_IMAGE_TAG}"
+    - echo "CV_CHART_VERSION=${CV_CHART_VERSION}" >> variables.env
+    - echo "CV_IMAGE_TAG=${CV_IMAGE_TAG}" >> variables.env
+  artifacts:
+    reports:
+      dotenv: variables.env
+
+helm-install:
+  stage: deploy
+  script:
+    - echo "使用 Helm chart $CV_CHART_VERSION , docker image $CV_IMAGE_TAG 佈署服務到 K8S cluster."
+  after_script:
+    - echo "helm-install completes."

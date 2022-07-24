@@ -1,0 +1,225 @@
+# 情境 : Code Repo for build docker image
+# 開發人員 push `DEV` 時觸發 DEV pipeline 執行 :
+#   1. build-scan (Build Dockefile include Static Code Analysis)
+#   2. test
+#   3. publish (Publish docker image to Nexus)
+#   4. trigger (publish-manifest-repo : Clone Manifest repo, Modify YAMLs, Push to Manifest repo)
+# apply Merge Request `DEV` into 'main'
+#   1. 部門主管確認沒問題按下 Approve (TO-DO : 通知 SQA)
+# SQA 按下 Merge 會觸發 main pipeline 執行 :
+#   1. build-scan
+#   2. publish
+#   3. trigger (merge-request-manifest-repo)
+
+variables:
+  # When using dind service, you must instruct docker to talk with the
+  # daemon started inside of the service. The daemon is available with
+  # a network connection instead of the default /var/run/docker.sock socket.
+  DOCKER_HOST: tcp://docker:2375
+
+  # Docker-in-Docker with TLS disabled in the Docker executor
+  # This instructs Docker not to start over TLS.
+  DOCKER_TLS_CERTDIR: ""
+
+  # To enable debug logging (tracing), set the CI_DEBUG_TRACE variable to 'true'
+  #CI_DEBUG_TRACE: "true"
+
+  # A Git strategy of none also re-uses the local working copy,
+  # but skips all Git operations normally done by GitLab.
+  # GitLab Runner pre-clone scripts are also skipped.
+  GIT_STRATEGY: none
+
+  # 考慮統一定義在 Global 中
+  IMAGE_REGISTRY_HOSTED: "sfcs-docker.mic.com.tw:8091"
+  IMAGE_REGISTRY_GROUP: "sfcs-docker.mic.com.tw:8090"
+
+  # 指定相對應的 Manifest Project ID
+  CV_MANIFEST_PRJ_ID: "17"
+
+  # 以下變數為 build & publish 使用
+  CV_APP_NAME: "flow-module"
+  CV_SRC_FOLDER: "WebApi.Module.Flow"
+  CV_ENVIRONMENT: $CI_COMMIT_REF_SLUG
+  CV_TAG: "None"
+  CV_IMAGE_NAME: ${CV_APP_NAME}-${CV_ENVIRONMENT}
+
+# 執行條件:
+# 必須要存在 Dockerfile, gitlab-ci-variables.yml
+# 必須要更改 gitlab-ci-variables.yml 中的 tag
+# Conditional Set Variable
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - ${CV_SRC_FOLDER}/Dockerfile
+        - ${CV_SRC_FOLDER}/gitlab-ci-variables.yml
+    - changes:
+        - gitlab-ci-variables.yml
+    - if: $CI_COMMIT_REF_SLUG == "main"
+      variables:
+        CV_ENVIRONMENT: "prod"
+
+default:
+  tags: # 如果使用了多個 tags 那 gitlab runner 必須都具有這些 tags 才會將 job 指派給它.
+    - docker # 預設每個 job 都使用 docker executor 執行 (gitlab runner 註冊時 tag 須加上 docker).
+
+stages: # DevSecOps 的 stages, 也代表 job 的執行順序.
+  - info
+  - variables
+  - build-scan
+  - test
+  - publish
+  - trigger
+
+show-info:
+  stage: info
+  script:
+    - echo "顯示所有 GitLab 變數."
+    - export
+  after_script:
+    - echo "show-info completes."
+  rules:
+    - when: always
+
+assign-variables:
+  stage: variables
+  before_script:
+    - "wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64"
+    - "chmod a+x /usr/local/bin/yq"
+    - "yq --version"
+    - CV_TAG=$(yq -e '.variables.tag' gitlab-ci-variables.yml)
+  script:
+    - echo "Assign variable..."
+    - echo "${CV_ENVIRONMENT} ${CV_TAG}"
+    - echo "CV_ENVIRONMENT=${CV_ENVIRONMENT}" >> variables.env
+    - echo "CV_TAG=${CV_TAG}" >> variables.env
+  artifacts:
+    reports:
+      dotenv: variables.env
+
+# 將 SonarQube 原先提供的 sonarqube-check job 提供的 script 整合至 Dockerfile 中
+# 再透過 docker build 動態把參數傳入
+build-dockerfile:
+  stage: build-scan
+  dependencies:
+    - assign-variables
+  script:
+    - echo "Build docker image and SonarScanner check..."
+    - echo "$CV_ENVIRONMENT $CV_TAG"
+    - >
+      docker build
+      -f WebApi.Module.Flow/Dockerfile
+      --build-arg env=${CV_ENVIRONMENT}
+      --build-arg version=${CV_TAG}
+      --label "org.opencontainers.image.title=$CI_PROJECT_TITLE"
+      --label "org.opencontainers.image.url=$CI_PROJECT_URL"
+      --label "org.opencontainers.image.created=$CI_JOB_STARTED_AT"
+      --label "org.opencontainers.image.revision=$CI_COMMIT_SHA"
+      --label "org.opencontainers.image.version=$CI_COMMIT_REF_NAME"
+      -t ${CV_IMAGE_NAME}:${CV_TAG} --no-cache .
+    - docker save -o ${CV_IMAGE_NAME}:${CV_TAG}.tgz ${CV_IMAGE_NAME}:${CV_TAG}
+  artifacts:
+    name: "$CI_JOB_NAME-artifacts"
+    paths: # 將 docker save 匯出的 image 保存起來
+      - ${CV_IMAGE_NAME}:${CV_TAG}.tgz
+    expire_in: 30 mins # artifacts 的檔案只保存 30 分鐘
+
+.testing-unit:
+  stage: test
+  only:
+    - DEV
+  script:
+    - echo "執行測單元測試"
+    - sleep 5
+  after_script:
+    - echo "testing-unit completes."
+
+.testing-performance:
+  stage: test
+  only:
+    - DEV
+  script:
+    - echo "執行效能測試"
+  after_script:
+    - echo "testing-performance completes."
+
+publish-to-nexus: # 只有前面的 stage 都成功執行後才會執行 publish stage.
+  variables:
+    # publish stage 不需要 clone source code. (https://docs.gitlab.com/ee/ci/runners/configure_runners.html#git-strategy)
+    GIT_STRATEGY: none
+  stage: publish
+  dependencies:
+    - assign-variables
+    - build-dockerfile
+  before_script:
+    - mkdir -p $HOME/.docker
+    - echo $DOCKER_AUTH_CONFIG > $HOME/.docker/config.json
+  script: # 讀取從 build-dockerfile job 保存的 image 然後發布至 Nexus docker registry
+    - echo "Publish to Nexus server..."
+    - docker load -i ${CV_IMAGE_NAME}:${CV_TAG}.tgz
+    - docker tag ${CV_IMAGE_NAME}:${CV_TAG} ${IMAGE_REGISTRY_HOSTED}/${CV_IMAGE_NAME}:${CV_TAG}
+    - docker push ${IMAGE_REGISTRY_HOSTED}/${CV_IMAGE_NAME}:${CV_TAG}
+
+publish-manifest-repo:
+  tags:
+    - shell
+    - 10.88.26.237
+  stage: trigger
+  only:
+    - DEV
+  script:
+    - echo "$PWD"
+    # 如果 yq 已經尚未下載過的話, 就 git clone
+    - |
+      if [ ! -f "/usr/local/bin/yq" ]
+      then
+        echo "Install yq"
+        sudo add-apt-repository ppa:rmescandon/yq
+        sudo apt update
+        sudo apt install --yes wget
+        sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        chmod a+x /usr/local/bin/yq
+      fi
+
+    # 如果資料夾 k8s-manifest 不存在的話, 就 git clone
+    - |
+      if [ ! -d "k8s-manifest" ]
+      then
+        echo "k8s-manifest does not exist, Clone YAML repo"
+        git clone http://shawn.yang:${CV_RUNNER_TOKEN}@10.88.26.237/shawn.yang/k8s-manifest.git
+      fi
+
+    - echo "Configure git"
+    - cd k8s-manifest
+    - git config user.name "shawn.yang"
+    - git config user.email shawn.yang@mic.com.tw
+    - git pull
+    - git checkout DEV
+
+    - echo "update YAML -> $PWD values.yaml"
+    - yq -i '.deploy.image.tag = "1.2"' values.yaml
+
+    - echo "Commit & Push to YAML repo"
+    - git add .
+    - git commit -m "update image Version:1.2"
+    - git push origin DEV
+  after_script:
+    - echo "publish-manifest-repo completes."
+
+merge-request-manifest-repo:
+  tags:
+    - shell
+    - 10.88.26.237
+  stage: trigger
+  only:
+    - main
+  script:
+    - echo "Call merge-request api to YAML repo id:$CV_MANIFEST_PRJ_ID"
+    - >
+      curl
+      --request POST --header "PRIVATE-TOKEN: DLuk92uGE7UxsEhzje6f" "http://10.88.26.237/api/v4/projects/$CV_MANIFEST_PRJ_ID/merge_requests"
+      --header 'Content-Type: application/json'
+      --show-error
+      --data "{\"title\":\"Code repo -> $CI_COMMIT_SHA ready go PROD\",\"source_branch\":\"DEV\", \"target_branch\":\"main\"}"
+  after_script:
+    - echo "merge-request-manifest-repo completes."
