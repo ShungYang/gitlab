@@ -1,0 +1,69 @@
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}-deploy
+  namespace: {{ .Values.namespace }}
+  labels:
+    k8s-app: {{ .Chart.Name }}
+spec:
+  selector:
+    matchLabels:
+      k8s-app: {{ .Chart.Name }}
+  replicas:  {{ .Values.deploy.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: {{ .Values.deploy.maxSurge }} # 升級過程中最多可以比原先設定所多出的 pod 數量
+      maxUnavailable: {{ .Values.deploy.maxUnavailable }} # 最多可以有幾個 pod 處在無法服務的狀態
+  minReadySeconds: 5
+  template:
+    metadata:
+      labels:
+        k8s-app: {{ .Chart.Name }}
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/role
+                    operator: NotIn
+                    values:
+                      - master
+      # initContainers:
+      # Init containers are exactly like regular containers, except:
+      # - Init containers always run to completion.
+      # - Each init container must complete successfully before the next one starts.
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.deploy.image.repository }}{{ .Chart.Name }}:{{ .Values.deploy.env.mode }}-{{ .Chart.AppVersion }}"
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: 1.0
+              memory: 1Gi
+          ports:
+            - containerPort: 80
+              name: {{ .Chart.Name }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Chart.Name }}
+            failureThreshold: 1
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /health
+              port: {{ .Chart.Name }}
+            failureThreshold: 2
+            periodSeconds: 60
+            timeoutSeconds: 60
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: {{ .Values.deploy.env.mode }}
+            - name: ASPNETCORE_PATHBASE
+              value: {{ .Values.deploy.env.pathBase }}
+      imagePullSecrets:
+        - name: {{ .Values.deploy.imagePullSecrets }}
+      restartPolicy: Always

@@ -1,0 +1,151 @@
+# 情境 : Manifest repo for deploy helm to K8S
+# 由 Code repo push `DEV` 時觸發 DEV pipeline 執行 :
+#   1. deploy
+# 由 Code repo merge-request `DEV` into 'main'
+# 當到了上線時間 SQA 即可按下 Merge 作一鍵佈署
+# SQA 按下 Merge 會觸發 main pipeline 執行 :
+#   1. deploy
+
+variables:
+  # 需要定義在 Gitlab SFCS `Group` CI/CD Variable 中
+  # CV_NEXUS_USER: "admin"
+  # CV_NEXUS_PWD: "nexussfcs"
+  # CV_NEXUS_URL: "sfcs-docker.mic.com.tw:8443"
+  # CV_HELM_REPOSITORY_NAME: "helm-hosted-sfcs"
+  #-------------------------------------------------
+
+  CV_IMAGE_NAME: "None"
+  CV_CHART_NAME: "None"
+  CV_VERSION: "None"
+  CV_NAMESPACE: "None"
+  CV_ENVIRONMENT: $CI_COMMIT_REF_SLUG # dev or main
+
+  CV_HELM_REPOSITORY_PATH: "https://${CV_NEXUS_URL}/repository/${CV_HELM_REPOSITORY_NAME}/"
+
+# merge request 不觸發 pipeline
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - if: $CI_COMMIT_BRANCH == "main"
+      variables:
+        CV_ENVIRONMENT: "prod"
+        # 切換成正式區的 shell executor ip
+        CV_DEPLOY_HOST: 10.88.26.226
+    - if: $CI_COMMIT_BRANCH == "dev"
+      variables:
+        # 切換成測試區的 shell executor ip
+        CV_DEPLOY_HOST: 10.88.26.237
+
+default:
+  tags:
+    - shell
+    - ${CV_RUNNER_SHELL}
+
+stages:
+  - info
+  - variables
+  - publish
+  - deploy
+
+show-info:
+  variables:
+    GIT_STRATEGY: none
+  stage: info
+  script:
+    - echo "${CI_JOB_NAME}..."
+    - export
+  after_script:
+    - echo "${CI_JOB_NAME} completes."
+  rules:
+    - when: always
+
+assign-variables:
+  stage: variables
+  before_script: # 安裝 yq
+    # - "wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64"
+    # - "chmod a+x /usr/local/bin/yq"
+    # - "yq --version"
+    # - CV_TAG=$(yq -e '.variables.tag' gitlab-ci-variables.yml)
+    - | # 如果 yq 尚未下載過的話, 就進行安裝
+      if [ ! -f "/usr/local/bin/yq" ]
+      then
+        echo "Install yq"
+        sudo add-apt-repository ppa:rmescandon/yq
+        sudo apt update
+        sudo apt install --yes wget
+        sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo chmod a+x /usr/local/bin/yq
+      fi
+    - "sudo yq --version"
+    - CV_IMAGE_NAME=$(sudo yq -e '.name' Chart.yaml)
+    - CV_CHART_NAME=$(sudo yq -e '.name' Chart.yaml)
+    - CV_VERSION=$(sudo yq -e '.version' Chart.yaml)
+    - CV_NAMESPACE=$(sudo yq -e '.namespace' values.yaml)
+  script:
+    - echo "${CI_JOB_NAME} ${CV_CHART_NAME} ${CV_VERSION}..."
+    - echo "CV_IMAGE_NAME=${CV_IMAGE_NAME}" >> variables.env
+    - echo "CV_CHART_NAME=${CV_CHART_NAME}" >> variables.env
+    - echo "CV_VERSION=${CV_VERSION}" >> variables.env
+    - echo "CV_NAMESPACE=${CV_NAMESPACE}" >> variables.env
+  artifacts:
+    reports:
+      dotenv: variables.env
+
+# 是以 gitlab-runner 這個 user 來運行 Helm CLI, 所以需要給 gitlab-runner 有 root 權限.
+# 注意 helm package 打包後的檔名會使用 {chart-name}-{version}.
+publish-job:
+  stage: publish
+  script:
+    - echo "${CI_JOB_NAME} ${CV_CHART_NAME} ${CV_VERSION}..."
+    - sudo helm repo add ${CV_HELM_REPOSITORY_NAME} ${CV_HELM_REPOSITORY_PATH} --force-update --username $CV_NEXUS_USER --password $CV_NEXUS_PWD
+    - helm package ./
+    - curl -u $CV_NEXUS_USER:$CV_NEXUS_PWD ${CV_HELM_REPOSITORY_PATH} --upload-file ${CV_CHART_NAME}-$CV_VERSION.tgz -v
+    - echo "${CI_JOB_NAME} complete."
+
+deploy-docker-to-dev:
+  variables: # overwrite global DOCKER_HOST value
+    DOCKER_HOST: ""
+  stage: deploy
+  tags:
+    - shell # 使用 Shell Executor
+    - ${CV_DEPLOY_HOST}
+  dependencies:
+    - assign-variables
+  before_script:
+    # 必須做 login 的動作, 做身分驗證 (本以為會直接讀取 ~/.docker/config.json 卻沒生效...)
+    - docker login -u $CV_NEXUS_USER -p $CV_NEXUS_PWD ${CV_IMAGE_REGISTRY_GROUP}
+  script: # 從 Nexus docker registry 下載先前發布的 image, 並且運行起來.
+    - echo "Deploy to ${CV_DEPLOY_HOST}..."
+    - docker pull ${CV_IMAGE_REGISTRY_GROUP}/${CV_IMAGE_NAME}:${CV_ENVIRONMENT}-${CV_VERSION}
+    - |
+      if [[ $(docker inspect -f '{{.State.Running}}' $CV_IMAGE_NAME) == "true" ]]; then
+        echo "Stop $CV_IMAGE_NAME first..."
+        docker container stop $CV_IMAGE_NAME
+        docker container rm $CV_IMAGE_NAME
+      else
+        echo "$CV_IMAGE_NAME not running"
+      fi
+    - docker run -d -p 7770:80 --name $CV_IMAGE_NAME ${CV_IMAGE_REGISTRY_GROUP}/${CV_IMAGE_NAME}:${CV_ENVIRONMENT}-${CV_VERSION}
+  only:
+    - dev
+
+deploy-helm-to-main: # 以 gitlab-runner 使用 helm CLI 時需指定路徑 --kubeconfig /home/osadmin/.kube/config
+  tags:
+    - shell
+    - ${CV_DEPLOY_HOST} # 根據 branch dev / main 來決定佈署到哪台 host
+  stage: deploy
+  script:
+    - echo "${CI_JOB_NAME} ${CV_ENVIRONMENT} ${CV_VERSION} ${CV_DEPLOY_HOST}..."
+    - sudo helm repo update
+    - >
+      sudo helm upgrade ${CV_CHART_NAME} ${CV_HELM_REPOSITORY_NAME}/${CV_CHART_NAME}
+      --set-string deploy.env.mode=${CV_ENVIRONMENT}
+      --version ${CV_VERSION}
+      --namespace ${CV_NAMESPACE}
+      --install
+      --debug
+      --kubeconfig /home/osadmin/.kube/config
+    - echo "${CI_JOB_NAME} complete."
+  only:
+    - main

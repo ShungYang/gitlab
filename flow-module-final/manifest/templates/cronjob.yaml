@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Chart.Name }}-cronjob
+  namespace: {{ .Values.namespace }}
+spec:
+  schedule: {{ .Values.cronjob.schedule }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: kubernetes.io/role
+                        operator: NotIn
+                        values:
+                          - master
+          containers:
+            - name: flow-module-curl
+              image: curlimages/curl:7.80.0
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/sh
+                - -ec
+            {{ if eq .Values.svc.type "NodePort" }}
+                - 'curl -X POST "{{ .Values.cronjob.host }}:{{ .Values.svc.nodePort}}{{ .Values.deploy.env.pathBase }}{{ .Values.cronjob.todoMailEnpoint }}" {{ .Values.cronjob.postHeaderCmd }}'
+            {{ else }}
+                - 'curl -X POST "{{ .Values.cronjob.host }}{{ .Values.deploy.env.pathBase }}{{ .Values.cronjob.todoMailEnpoint }}" {{ .Values.cronjob.postHeaderCmd }}'
+            {{ end }}
+                - date; echo Done
+          restartPolicy: OnFailure
+---
+

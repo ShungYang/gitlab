@@ -1,0 +1,271 @@
+# Group Gitlab Runner 安裝步驟, 可以參考
+# https://gitlab01.mic.com.tw/devsecops/planet/docker/gitlab/-/blob/main/README-docker-executor.md
+# https://gitlab01.mic.com.tw/devsecops/planet/docker/gitlab/-/blob/main/README-shell-executor.md
+
+variables:
+  # To enable debug logging (tracing), set the CI_DEBUG_TRACE variable to 'true'
+  #CI_DEBUG_TRACE: "true"
+
+  # When using dind service, you must instruct docker to talk with the
+  # daemon started inside of the service. The daemon is available with
+  # a network connection instead of the default /var/run/docker.sock socket.
+  DOCKER_HOST: tcp://docker:2375
+
+  # Docker-in-Docker with TLS disabled in the Docker executor
+  # This instructs Docker not to start over TLS.
+  DOCKER_TLS_CERTDIR: ""
+
+  # A Git strategy of none also re-uses the local working copy,
+  # but skips all Git operations normally done by GitLab.
+  # GitLab Runner pre-clone scripts are also skipped.
+  GIT_STRATEGY: fetch
+
+  # 以下變數為 build & publish 使用
+  CV_ENVIRONMENT: $CI_COMMIT_REF_SLUG # dev or main
+  CV_TAG: "None" # 會由之後 assign-variables 賦值
+  CV_VERSION: "None" # 會由之後 assign-variables 賦值
+
+  # 定義在 Gitlab SFCS `Group` CI/CD Variable 中
+  # CV_NEXUS_USER: "mis.tester"
+  # CV_NEXUS_PWD: "mis"
+  # CV_IMAGE_REGISTRY_HOSTED: "sfcs-docker.mic.com.tw:8085" # docker-hosted-it
+  # CV_IMAGE_REGISTRY_GROUP: "sfcs-docker.mic.com.tw:8082" # docker-group
+  # CV_GROUP_OWNER ex. shawn.yang
+  # CV_GROUP_OWNER_TOKEN 需要 Group Owner 的 Access Token : User Settings -> Edit Profile -> Access Token [Scopes : api, read_repository, write_repository ] ex. glpat-n9MqgGWs8gGsBHrak9vc
+  # CV_RUNNER_SHELL: 10.88.26.237    需為測試區的 HOST
+  # CV_RUNNER_DOCKER: 10.88.26.238   需為測試區的 HOST
+  # SONAR_HOST_URL: https://sonarqube.mic.com.tw
+
+  # 需要定義在 Gitlab `Project` CI/CD Variable 中
+  # CV_PRJ_MANIFEST_TOKEN 需要針對 Manifest 專案建立 Access Token [Scopes : api] ex. glpat-gx_CyS8mhUPdKkkAinQx
+  # SONAR_TOKEN           參考 SonarQube 建立專案的步驟 : 0c09ca4539d2c27a8453f9aee9e221be8adaebcf
+
+  # 需要修改以下變數
+  # 做為 docker image / helm chart name
+  CV_APP_NAME: "demo-k8s"
+  DOCKERFILE_PATH: "dotNetWebApi.demo/Dockerfile"
+  CV_MANIFEST_NAME: "demo-k8s-manifest"
+  # 指定相對應的 Manifest Project Url
+  CV_MANIFEST_REPO: "gitlab01test.mic.com.tw/sfcs/k8s/demo-k8s-manifest.git"
+  CV_MANIFEST_REPO_WITH_AUTH: "https://${CV_GROUP_OWNER}:${CV_GROUP_OWNER_TOKEN}@${CV_MANIFEST_REPO}"
+  # 指定相對應的 Manifest Project ID, 需要透過 WebAPI 去觸發 Config project 的 merge request
+  CV_MANIFEST_PRJ_ID: "575"
+
+  # 需要定義在 GitLab Ruuner Config
+  # DOCKER_AUTH_CONFIG
+
+# 執行條件:
+# 必須要存在 Dockerfile, gitlab-ci-variables.yml on `anywhere`
+# 必須要更改 gitlab-ci-variables.yml 中的 tag
+# Conditional Set Variable
+workflow:
+  rules:
+    - if: $CI_COMMIT_REF_SLUG == "main"
+      variables:
+        CV_ENVIRONMENT: "prod"
+      exists:
+        - Dockerfile
+        - gitlab-ci-variables.yml
+      changes:
+        - gitlab-ci-variables.yml
+
+    - if: $CI_COMMIT_BRANCH
+      exists:
+        - Dockerfile
+        - gitlab-ci-variables.yml
+      changes:
+        - gitlab-ci-variables.yml
+
+default:
+  tags:
+    - docker
+    - ${CV_RUNNER_DOCKER}
+
+stages: # DevSecOps 的 stages, 也代表 job 的執行順序.
+  - info
+  - variables
+  - build
+  - test
+  - release
+  - trigger
+
+show-info:
+  variables:
+    GIT_STRATEGY: none
+  stage: info
+  script:
+    - echo "顯示所有 GitLab 變數."
+    - export
+  after_script:
+    - echo "${CI_JOB_NAME} completes."
+  rules:
+    - when: always
+
+assign-variables:
+  stage: variables
+  before_script:
+    - "wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64"
+    - "chmod a+x /usr/local/bin/yq"
+    - "yq --version"
+  script:
+    - echo "${CI_JOB_NAME} ${CV_ENVIRONMENT}..."
+    - CV_VERSION=$(yq -e '.variables.version' gitlab-ci-variables.yml)
+    - CV_TAG=${CV_ENVIRONMENT}-${CV_VERSION}
+    - echo "CV_ENVIRONMENT=${CV_ENVIRONMENT}" >> variables.env
+    - echo "CV_TAG=${CV_TAG}" >> variables.env
+    - echo "CV_VERSION=${CV_VERSION}" >> variables.env
+  artifacts:
+    reports:
+      dotenv: variables.env
+  after_script:
+    - echo "${CI_JOB_NAME} completes."
+
+# 將 SonarQube 原先提供的 sonarqube-check job 提供的 script 整合至 Dockerfile 中
+# 再透過 docker build 動態把參數傳入
+build-docker:
+  stage: build
+  dependencies:
+    - assign-variables
+  script:
+    - echo "${CI_JOB_NAME} $CV_ENVIRONMENT $CV_VERSION $CV_TAG..."
+    - >
+      docker build
+      -f ${DOCKERFILE_PATH}
+      --build-arg env=${CV_ENVIRONMENT}
+      --build-arg version=${CV_VERSION}
+      --label "org.opencontainers.image.title=$CI_PROJECT_TITLE"
+      --label "org.opencontainers.image.url=$CI_PROJECT_URL"
+      --label "org.opencontainers.image.created=$CI_JOB_STARTED_AT"
+      --label "org.opencontainers.image.revision=$CI_COMMIT_SHA"
+      --label "org.opencontainers.image.version=$CI_COMMIT_REF_NAME"
+      -t ${CV_APP_NAME}:${CV_TAG} --no-cache .
+    - docker save -o ${CV_APP_NAME}:${CV_TAG}.tgz ${CV_APP_NAME}:${CV_TAG}
+  artifacts: # maybe change artifacts size limit (in MB).
+    name: "$CI_JOB_NAME-artifacts"
+    paths: # 將 docker save 匯出的 image 保存起來
+      - ${CV_APP_NAME}:${CV_TAG}.tgz
+    expire_in: 30 mins # artifacts 的檔案只保存 30 分鐘
+  after_script:
+    - echo "${CI_JOB_NAME} completes."
+
+# image 必須修改
+# sonarscanner begin 加上 /v:"$CI_COMMIT_SHORT_SHA" 才知道掃描的版本是哪個 commit
+# sonarscanner begin 加上 /d:sonar.qualitygate.wait="true" 才會根據 Quality Gate 作卡控
+sonarqube-check:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:5.0 # 必須修改為 sdk 映像檔
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar" # Defines the location of the analysis task cache
+    GIT_DEPTH: "0" # Tells git to fetch all the branches of the project, required by the analysis task
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
+  script:
+    - echo "${CI_JOB_NAME}..."
+    - "apt-get update"
+    - "apt-get install --yes openjdk-11-jre"
+    - "dotnet tool install --global dotnet-sonarscanner"
+    - 'export PATH="$PATH:$HOME/.dotnet/tools"'
+    - 'dotnet sonarscanner begin /k:"demo-k8s-code" /v:"$CI_COMMIT_SHORT_SHA" /d:sonar.login="$SONAR_TOKEN" /d:"sonar.host.url=$SONAR_HOST_URL" /d:sonar.qualitygate.wait="true" '
+    - "dotnet build"
+    - 'dotnet sonarscanner end /d:sonar.login="$SONAR_TOKEN"'
+  after_script:
+    - echo "${CI_JOB_NAME} completes."
+  only:
+    - dev
+
+publish-to-nexus: # 只有前面的 stage 都成功執行後才會執行 publish stage.
+  # 必須做 login 的動作, 做身分驗證 (本以為會直接讀取 ~/.docker/config.json 卻沒生效...)
+  # - docker login -u admin -p nexussfcs ${IMAGE_REGISTRY_GROUP}
+  stage: release
+  dependencies:
+    - assign-variables
+    - build-docker
+  # before_script:
+  #   - mkdir -p $HOME/.docker
+  #   - echo $DOCKER_AUTH_CONFIG > $HOME/.docker/config.json  # 使用 Docker executor 使用的登入方式.
+  script: # 讀取從 build-docker-scan job 保存的 image 然後發布至 Nexus docker registry
+    - echo "${CI_JOB_NAME}..."
+    - docker login -u ${CV_NEXUS_USER} -p ${CV_NEXUS_PWD} ${CV_IMAGE_REGISTRY_HOSTED} # 使用 shell executor 必須做 login 的動作, 做身分驗證 (本以為會直接讀取 ~/.docker/config.json 卻沒生效...)
+    - docker load -i ${CV_APP_NAME}:${CV_TAG}.tgz
+    - docker tag ${CV_APP_NAME}:${CV_TAG} ${CV_IMAGE_REGISTRY_HOSTED}/${CV_APP_NAME}:${CV_TAG}
+    - docker push ${CV_IMAGE_REGISTRY_HOSTED}/${CV_APP_NAME}:${CV_TAG}
+  after_script:
+    - echo "${CI_JOB_NAME} completes."
+
+trigger-manifest-repo:
+  tags:
+    - shell
+    - ${CV_RUNNER_SHELL}
+  stage: trigger
+  only:
+    - dev
+  before_script: # 如果 yq 尚未下載過的話, 就進行安裝
+    - |
+      if [ ! -f "/usr/local/bin/yq" ]
+      then
+        echo "Install yq"
+        sudo add-apt-repository ppa:rmescandon/yq
+        sudo apt update
+        sudo apt install --yes wget
+        sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo chmod a+x /usr/local/bin/yq
+      fi
+    - "sudo yq --version"
+  script:
+    - echo "${CI_JOB_NAME} $PWD..."
+    # 如果資料夾 k8s-manifest 不存在的話, 就 git clone
+    - |
+      if [ ! -d $CV_MANIFEST_NAME ]
+      then
+        echo "${CV_MANIFEST_NAME} does not exist, Clone YAML repo"
+        git clone $CV_MANIFEST_REPO_WITH_AUTH
+      fi
+
+    - echo "Configure git"
+    - cd $CV_MANIFEST_NAME
+    - git config user.name $GITLAB_USER_LOGIN
+    - git config user.email $GITLAB_USER_EMAIL
+    - git checkout $CI_COMMIT_BRANCH
+    - git pull origin $CI_COMMIT_BRANCH
+    - git pull origin main
+
+    - echo "Update YAML $CV_APP_NAME $CV_VERSION @$PWD"
+    - sudo yq -i ".name = \"$CV_APP_NAME\"" Chart.yaml
+    - sudo yq -i ".version = \"$CV_VERSION\"" Chart.yaml
+    - sudo yq -i ".appVersion = \"$CV_VERSION\"" Chart.yaml
+    - sudo yq -i ".description = \"$CI_COMMIT_MESSAGE\"" Chart.yaml
+
+    - echo "Commit & Push to YAML repo"
+    # Uncommitted changes
+    - |
+      if [ ! -z "$(git status --porcelain)" ]
+      then
+        git add .
+        git commit -m "from $CI_PROJECT_NAME-$CV_VERSION-$CI_COMMIT_SHORT_SHA"
+      fi
+    #- git add .
+    #- git commit -m "Version:$CV_VERSION @$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA"
+    - git push $CV_MANIFEST_REPO_WITH_AUTH $CI_COMMIT_BRANCH
+  after_script:
+    - echo "${CI_JOB_NAME} completes."
+
+merge-request-manifest-repo:
+  tags:
+    - shell
+    - ${CV_RUNNER_SHELL}
+  stage: trigger
+  only:
+    - main
+  script:
+    - echo "${CI_JOB_NAME} $CV_MANIFEST_PRJ_ID..."
+    - >
+      curl
+      --request POST --header "PRIVATE-TOKEN: $CV_PRJ_MANIFEST_TOKEN"
+      "$CI_API_V4_URL/projects/$CV_MANIFEST_PRJ_ID/merge_requests"
+      --header 'Content-Type: application/json'
+      --show-error
+      --data "{\"title\":\"$CI_COMMIT_TITLE $CI_PROJECT_NAME-$CV_VERSION-$CI_COMMIT_SHORT_SHA\",\"source_branch\":\"dev\",\"target_branch\":\"main\"}"
+  after_script:
+    - echo "${CI_JOB_NAME} completes."

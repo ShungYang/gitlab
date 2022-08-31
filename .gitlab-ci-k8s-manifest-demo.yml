@@ -6,6 +6,10 @@
 # SQA 按下 Merge 會觸發 main pipeline 執行 :
 #   1. deploy
 
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "pipeline"
+
 variables:
   CV_CHART_VERSION: "None"
   CV_IMAGE_TAG: "None"

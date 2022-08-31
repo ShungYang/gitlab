@@ -1,0 +1,20 @@
+# https://kubernetes.io/docs/concepts/services-networking/service/
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Chart.Name }}-svc
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    k8s-app: {{ .Chart.Name }}
+  type: {{ .Values.svc.type }}
+  ports:
+    - name: {{ .Chart.Name }}
+      protocol: TCP
+      port: {{ .Values.svc.port }}
+      targetPort: {{ .Values.svc.podPort }} # 容器服務使用的 port
+  {{ if eq .Values.svc.type "NodePort" }}
+      nodePort: {{ .Values.svc.nodePort }}
+  {{ end }}
+---
+

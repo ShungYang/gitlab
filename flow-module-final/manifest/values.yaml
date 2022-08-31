@@ -1,0 +1,36 @@
+# Default values for flow-module.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+nameOverride: ""
+fullnameOverride: ""
+namespace: "hou-fa-namespace"
+
+deploy:
+  replicaCount: 2
+
+  # 升級過程中最多可以比原先設定所多出的 pod 數量
+  maxSurge: 1
+
+  # 最多可以有幾個 pod 處在無法服務的狀態
+  maxUnavailable: 1
+  image:
+    repository: sfcs-docker.mic.com.tw:8090/
+    # Overrides the image tag whose default is the chart appVersion.
+    tag: ""
+  imagePullSecrets: nexus-registry-secret
+  env:
+    mode: dev
+    pathBase: /flowmodule
+
+svc:
+  type: NodePort
+  port: 80
+  podPort: 80
+  nodePort: 31080
+
+cronjob:
+  schedule: 0 8/5 * * *
+  host: sfcs-docker.mic.com.tw
+  todoMailEnpoint: /api/Schedule/MailToDoList
+  postHeaderCmd: '-H  "accept: */*" -H  "Content-Type: application/json" -d "{\"Uuid\":\"flow-module-cronjob\",\"ClientName\":\"flow-module-cronjob\"}"'

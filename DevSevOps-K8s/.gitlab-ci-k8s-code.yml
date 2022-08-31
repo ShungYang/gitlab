@@ -118,7 +118,7 @@ build-dockerfile:
       --label "org.opencontainers.image.version=$CI_COMMIT_REF_NAME"
       -t ${CV_IMAGE_NAME}:${CV_TAG} --no-cache .
     - docker save -o ${CV_IMAGE_NAME}:${CV_TAG}.tgz ${CV_IMAGE_NAME}:${CV_TAG}
-  artifacts:
+  artifacts: # 如果超過 Size Limit
     name: "$CI_JOB_NAME-artifacts"
     paths: # 將 docker save 匯出的 image 保存起來
       - ${CV_IMAGE_NAME}:${CV_TAG}.tgz

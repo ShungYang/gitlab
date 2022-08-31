@@ -1,0 +1,5 @@
+# 以下變數是定義給 Gitlab CI/CD Pipeline 取用的
+
+variables:
+  # 於 stage : docker build & publish to Nexus 的版本編號
+  version: 1.2.0
