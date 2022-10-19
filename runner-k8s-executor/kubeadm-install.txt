@@ -1,0 +1,216 @@
+Rancher keepalive
+
+說明comminuti 版本能 support
+安碁
+
+fortify
+
+
+
+
+
+##
+sudo apt-get install openssh-server
+sudo ufw allow ssh
+
+##
+sudo apt install chrony
+sudo systemctl start chrony.service
+
+##
+sudo swapoff -a
+sudo vim /etc/fstab
+# 將 /swapfile 這一行註解起來(前方加上 '#' )
+
+systemctl --type swap
+# 將列出的設備使用 systemctl mask {device} 加以禁用
+
+
+##
+sudo vim /etc/hosts
+
+# /etc/hosts
+192.168.0.30 k8s-master
+192.168.0.31 k8s-worker1
+192.168.0.33 k8s-worker2
+
+
+##
+sudo apt-get update
+sudo apt-get install \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release
+
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt-get update
+sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+ 
+sudo groupadd docker 
+sudo usermod -aG docker $USER
+
+##
+sudo vim /etc/docker/daemon.json
+
+#/etc/docker/daemon.json
+{
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m"
+  },
+  "storage-driver": "overlay2",
+  "insecure-registries":["nexus.example.net"]
+}
+
+
+systemctl daemon-reload
+systemctl restart docker
+
+##
+sudo apt update
+sudo apt install git wget curl
+
+# For Intel 64-bit CPU
+wget https://github.com/Mirantis/cri-dockerd/releases/download/v0.2.5/cri-dockerd-0.2.5.amd64.tgz
+tar xvf cri-dockerd-0.2.5.amd64.tgz
+
+sudo mv cri-dockerd/cri-dockerd /usr/local/bin/
+
+# 確認是否執行成功
+cri-dockerd --version
+
+# Configure systemd units for cri-dockerd
+wget https://raw.githubusercontent.com/Mirantis/cri-dockerd/master/packaging/systemd/cri-docker.service
+wget https://raw.githubusercontent.com/Mirantis/cri-dockerd/master/packaging/systemd/cri-docker.socket
+sudo mv cri-docker.socket cri-docker.service /etc/systemd/system/
+sudo sed -i -e 's,/usr/bin/cri-dockerd,/usr/local/bin/cri-dockerd,' /etc/systemd/system/cri-docker.service
+
+# Start and enable the services
+sudo systemctl daemon-reload
+sudo systemctl enable cri-docker.service
+sudo systemctl enable --now cri-docker.socket
+
+# Confirm the service is now running
+systemctl status cri-docker.socket
+
+
+##
+# Update the apt package index and install packages needed to use the Kubernetes apt repository:
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates curl
+
+# Download the Google Cloud public signing key
+sudo curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+
+# Add the Kubernetes apt repository
+echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+# Update apt package index, install kubelet, kubeadm and kubectl, and pin their version:
+sudo apt-get update
+sudo apt-get install -y kubelet=1.24.4-00 kubeadm=1.24.4-00 kubectl=1.24.4-00
+sudo apt-mark hold kubelet kubeadm kubectl
+
+
+##
+# --ttl 設置為 0 代表 token 永不過期
+sudo kubeadm init --config kubeadm-config.yaml | tee kubeadm-init.log
+
+##
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+
+
+sudo kubeadm join 192.168.0.30:6443 --cri-socket unix:///var/run/cri-dockerd.sock --token abcdef.0123456789abcdef --discovery-token-ca-cert-hash sha256:a0cc850971ae6251e3ef6de56d57453e716ac55a9cef940022815007e9ae1805
+
+
+
+
+
+apt-cache policy kubeadm
+
+
+
+
+sudo kubeadm join 192.168.0.24:6443 --cri-socket unix:///var/run/cri-dockerd.sock --token x49s6o.ozjffbkii1js0vpu --discovery-token-ca-cert-hash sha256:d4181a4ed95cc2a9491657fad887eb8189754164dc251ca528e52adf1344eb6f
+
+
+kubectl drain k8s-worker1 --delete-local-data --force --ignore-daemonsets
+
+
+```bash
+# Display the configuration of a profile
+istioctl profile dump demo
+
+# Generate a manifest before installation
+istioctl manifest generate > demo-manifest.yaml
+```
+
+
+journalctl -xeu kubelet
+
+kubectl delete pods pod/microbot-lb-bdbdb8ff5-9xl7h --grace-period=0 --force
+
+
+checkov
+17252a06-9c2c-4731-8c1d-7b912cde6da2
+
+
+
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: backend
+  namespace: default
+spec:
+  gateways: []
+  hosts:
+  - "backend.default.svc.cluster.local"
+  http:
+...
+  - match:
+    - sourceLabels:
+        app: frontend
+        version: v2
+    route:
+    - destination:
+        host: backend.default.svc.cluster.local
+        subset: v2
+        port:
+          number: 80
+      weight: 100
+	  
+	  
+	  journalctl -xeu kubelet
+	  
+	  
+	  
+	  
+	  kubeadm token create --print-join-command
+	  kubeadm
+	  
+	  
+	  1. 文檔加入 port 衝突
+	  2. 實際流量的走向
+	  
+python 開發環境
+
+安裝套件:
+
+python extension pack
+Pylance
+
+python -m pip install -U autopep8
+python -m pip install -U pylint
+
+
+
