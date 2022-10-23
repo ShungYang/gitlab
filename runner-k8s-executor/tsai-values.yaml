@@ -1,0 +1,20 @@
+replicas: 5
+
+gitlabUrl: http://fw_git.phison.com/
+
+runnerRegistrationToken: "2BgzsrcCqZkyTFxTtwG2"
+
+rbac:
+  create: true
+
+runners:
+  config: |
+    [[runners]]
+      [runners.kubernetes]
+        image = "ubuntu:22.04"
+        cpu_limit = "1"
+        memory_limit = "1Gi"
+        service_cpu_limit = "1"
+        service_memory_limit = "1Gi"
+        helper_cpu_limit = "500m"
+        helper_memory_limit = "100Mi"
